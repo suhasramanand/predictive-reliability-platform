@@ -142,16 +142,26 @@ def rca(ctx: IncidentContext):
         f"CPU METRICS: {str(cpu_metrics)[:500]}\n"
         f"ERROR RATES: {str(error_metrics)[:500]}\n"
         f"LOG SAMPLE: {str(logs)[:700]}\n\n"
-        "Return ONLY valid JSON with this exact structure:\n"
-        "{\n"
-        '  "suspect_service": "service name or component",\n'
-        '  "confidence": 0.XX (decimal 0-1),\n'
-        '  "top_reasons": ["reason 1", "reason 2", "reason 3"],\n'
-        '  "evidence": "key metric or log pattern",\n'
-        '  "next_steps": ["action 1", "action 2"]\n'
-        "}\n"
+        "Analyze the data and provide a structured RCA report in markdown format:\n\n"
+        "## Root Cause Analysis\n\n"
+        "### Suspected Service\n"
+        "[service name or component]\n\n"
+        "### Confidence Level\n"
+        "[confidence percentage]\n\n"
+        "### Key Evidence\n"
+        "- [evidence 1]\n"
+        "- [evidence 2]\n"
+        "- [evidence 3]\n\n"
+        "### Likely Causes\n"
+        "1. [cause 1]\n"
+        "2. [cause 2]\n"
+        "3. [cause 3]\n\n"
+        "### Recommended Actions\n"
+        "1. [immediate action]\n"
+        "2. [investigation step]\n"
+        "3. [prevention measure]\n"
     )
-    answer = _llm(prompt, max_tokens=350, temperature=0.1)
+    answer = _llm(prompt, max_tokens=400, temperature=0.1)
     return {"rca": answer}
 
 
