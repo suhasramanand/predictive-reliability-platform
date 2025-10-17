@@ -173,11 +173,11 @@ services:
       - "8090:8090"
     environment:
       - PORT=8090
+      - GROQ_API_KEY=${GROQ_API_KEY}
       - GROQ_MODEL=openai/gpt-oss-120b
       - PROMETHEUS_URL=http://prometheus:9090
       - LOKI_URL=http://loki:3100
       - JAEGER_API=http://jaeger:16686/api
-      # Set secret at runtime: GROQ_API_KEY
     networks:
       - reliability-net
     depends_on:
