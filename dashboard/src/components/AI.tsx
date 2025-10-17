@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import ReactMarkdown from 'react-markdown'
 import { aiService, anomalyService, ServiceHealth } from '../api'
 
 // Tooltip Component
@@ -188,7 +189,9 @@ export default function AI() {
                   </svg>
                   <div className="flex-1">
                     <h4 className="font-semibold text-purple-900 mb-2">AI Response:</h4>
-                    <p className="text-gray-800 whitespace-pre-wrap">{chatResponse}</p>
+                    <div className="prose prose-sm max-w-none text-gray-800">
+                      <ReactMarkdown>{chatResponse}</ReactMarkdown>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -226,7 +229,9 @@ export default function AI() {
             </Tooltip>
             {incidentSummary && (
               <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                <p className="text-sm text-gray-800 whitespace-pre-wrap">{incidentSummary}</p>
+                <div className="prose prose-sm max-w-none text-gray-800">
+                  <ReactMarkdown>{incidentSummary}</ReactMarkdown>
+                </div>
               </div>
             )}
           </div>
@@ -259,7 +264,9 @@ export default function AI() {
             </Tooltip>
             {rca && (
               <div className="mt-4 p-4 bg-orange-50 rounded-lg border border-orange-200">
-                <p className="text-sm text-gray-800 whitespace-pre-wrap">{rca}</p>
+                <div className="prose prose-sm max-w-none text-gray-800">
+                  <ReactMarkdown>{rca}</ReactMarkdown>
+                </div>
               </div>
             )}
           </div>

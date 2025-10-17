@@ -28,17 +28,19 @@ class IncidentContext(BaseModel):
     services: list[str] | None = None
 
 
-def _llm(prompt: str) -> str:
+def _llm(prompt: str, max_tokens: int = 400, temperature: float = 0.2) -> str:
     if not GROQ_API_KEY:
         return "AI disabled: set GROQ_API_KEY to enable responses."
     if Groq:
         client = Groq(api_key=GROQ_API_KEY)
         resp = client.chat.completions.create(
             model=GROQ_MODEL,
-            messages=[{"role": "system", "content": "You are an SRE AI assistant."},
-                      {"role": "user", "content": prompt}],
-            temperature=0.2,
-            max_tokens=600,
+            messages=[
+                {"role": "system", "content": "You are a Site Reliability Engineering AI assistant. Provide concise, actionable responses focused on metrics, observability, and remediation. Use bullet points and be specific."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=temperature,
+            max_tokens=max_tokens,
         )
         return resp.choices[0].message.content or ""
     # Fallback (no SDK). Keep disabled to avoid leaking keys via raw HTTP by default.
@@ -94,14 +96,17 @@ def summarize(ctx: IncidentContext):
     services = _jaeger_services()
     logs = _loki('{job="orders-service"}')
     prompt = (
-        "Summarize incident context across metrics, logs, and traces. "
-        f"Time range: {ctx.time_range}.\n"
-        f"Metrics sample: {str(metrics)[:1200]}\n"
-        f"Jaeger services: {str(services)[:400]}\n"
-        f"Logs sample: {str(logs)[:800]}\n"
-        "Provide: key signals, impacted services, suspected root cause, recommended next actions."
+        f"Analyze this {ctx.time_range} incident data and provide a brief summary (max 200 words).\n\n"
+        f"METRICS: {str(metrics)[:800]}\n"
+        f"SERVICES: {str(services)[:300]}\n"
+        f"LOGS: {str(logs)[:600]}\n\n"
+        "Format your response as:\n"
+        "KEY SIGNALS: [what metrics/logs show]\n"
+        "IMPACTED SERVICES: [list services]\n"
+        "SUSPECTED CAUSE: [likely root cause]\n"
+        "RECOMMENDED ACTIONS: [3-5 specific next steps]\n"
     )
-    answer = _llm(prompt)
+    answer = _llm(prompt, max_tokens=300)
     return {"summary": answer}
 
 
@@ -109,12 +114,25 @@ def summarize(ctx: IncidentContext):
 def rca(ctx: IncidentContext):
     logs = _loki('{job=~"orders-service|users-service|payments-service"}', limit=100)
     metrics = _prom("sum by (job)(rate(http_requests_total[5m]))")
+    cpu_metrics = _prom("process_cpu_seconds_total")
+    error_metrics = _prom("rate(http_requests_total{status=~'5..'}[5m])")
+    
     prompt = (
-        "Given logs clusters and request rates by service, identify the most likely failing subsystem "
-        "and rationale. Return JSON with fields: {suspect_service, confidence, reasons}.\n"
-        f"Logs: {str(logs)[:1200]}\nMetrics: {str(metrics)[:600]}\n"
+        f"Perform root cause analysis for a {ctx.time_range} incident window.\n\n"
+        f"REQUEST RATES: {str(metrics)[:500]}\n"
+        f"CPU METRICS: {str(cpu_metrics)[:500]}\n"
+        f"ERROR RATES: {str(error_metrics)[:500]}\n"
+        f"LOG SAMPLE: {str(logs)[:700]}\n\n"
+        "Return ONLY valid JSON with this exact structure:\n"
+        "{\n"
+        '  "suspect_service": "service name or component",\n'
+        '  "confidence": 0.XX (decimal 0-1),\n'
+        '  "top_reasons": ["reason 1", "reason 2", "reason 3"],\n'
+        '  "evidence": "key metric or log pattern",\n'
+        '  "next_steps": ["action 1", "action 2"]\n'
+        "}\n"
     )
-    answer = _llm(prompt)
+    answer = _llm(prompt, max_tokens=350, temperature=0.1)
     return {"rca": answer}
 
 
@@ -127,11 +145,21 @@ class AdviceInput(BaseModel):
 @app.post("/advice")
 def advice(inp: AdviceInput):
     prompt = (
-        f"Service: {inp.service}\nAnomaly: {inp.anomaly}\nContext: {inp.context}\n"
-        "Recommend one remediation action among: restart_container, scale_up, alert."
-        " Explain briefly and return JSON {action, rationale}."
+        f"As an SRE AI, recommend the BEST remediation action for this situation:\n\n"
+        f"SERVICE: {inp.service}\n"
+        f"ANOMALY: {inp.anomaly}\n"
+        f"CONTEXT: {inp.context}\n\n"
+        "Available actions: restart_container, scale_up, alert\n\n"
+        "Return ONLY valid JSON with this exact structure:\n"
+        "{\n"
+        '  "action": "restart_container|scale_up|alert",\n'
+        '  "confidence": 0.XX (decimal 0-1),\n'
+        '  "rationale": "brief explanation in 1-2 sentences",\n'
+        '  "expected_impact": "what will happen",\n'
+        '  "risk_level": "low|medium|high"\n'
+        "}\n"
     )
-    answer = _llm(prompt)
+    answer = _llm(prompt, max_tokens=250, temperature=0.1)
     return {"advice": answer}
 
 
