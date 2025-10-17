@@ -8,6 +8,10 @@ const policyAPI = axios.create({
   baseURL: '/api/policy',
 })
 
+const aiAPI = axios.create({
+  baseURL: '/api/ai',
+})
+
 export interface Anomaly {
   service: string
   metric: string
@@ -108,6 +112,60 @@ export const policyService = {
   toggleAutoRemediation: async (): Promise<boolean> => {
     const response = await policyAPI.post('/toggle')
     return response.data.auto_remediation_enabled
+  },
+}
+
+export interface ChatRequest {
+  query: string
+  context?: Record<string, any>
+}
+
+export interface ChatResponse {
+  answer: string
+}
+
+export interface IncidentSummary {
+  summary: string
+}
+
+export interface RCAResponse {
+  rca: string
+}
+
+export interface AdviceRequest {
+  service: string
+  anomaly: string
+  context?: Record<string, any>
+}
+
+export interface AdviceResponse {
+  advice: string
+}
+
+export const aiService = {
+  chat: async (query: string, context?: Record<string, any>): Promise<string> => {
+    const response = await aiAPI.post('/chat', { query, context })
+    return response.data.answer
+  },
+
+  summarizeIncident: async (timeRange: string = '1h', services?: string[]): Promise<string> => {
+    const response = await aiAPI.post('/summarize', { time_range: timeRange, services })
+    return response.data.summary
+  },
+
+  getRCA: async (timeRange: string = '1h', services?: string[]): Promise<string> => {
+    const response = await aiAPI.post('/rca', { time_range: timeRange, services })
+    return response.data.rca
+  },
+
+  getAdvice: async (service: string, anomaly: string, context?: Record<string, any>): Promise<string> => {
+    const response = await aiAPI.post('/advice', { service, anomaly, context })
+    return response.data.advice
+  },
+
+  getHealth: async (): Promise<{ status: string; service: string }> => {
+    const response = await aiAPI.get('/health')
+    return response.data
   },
 }
 
