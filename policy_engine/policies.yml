@@ -1,0 +1,65 @@
+policies:
+  - name: "orders_high_latency_restart"
+    condition: "latency > 0.5"
+    action: "restart_container"
+    service: "orders"
+    cooldown: 300
+    enabled: true
+  
+  - name: "orders_high_cpu_alert"
+    condition: "cpu_usage > 85"
+    action: "alert"
+    service: "orders"
+    cooldown: 180
+    enabled: true
+  
+  - name: "orders_high_error_rate"
+    condition: "error_rate > 0.15"
+    action: "restart_container"
+    service: "orders"
+    cooldown: 300
+    enabled: true
+  
+  - name: "users_high_latency_restart"
+    condition: "latency > 0.5"
+    action: "restart_container"
+    service: "users"
+    cooldown: 300
+    enabled: true
+  
+  - name: "users_high_cpu_alert"
+    condition: "cpu_usage > 85"
+    action: "alert"
+    service: "users"
+    cooldown: 180
+    enabled: true
+  
+  - name: "users_high_error_rate"
+    condition: "error_rate > 0.12"
+    action: "restart_container"
+    service: "users"
+    cooldown: 300
+    enabled: true
+  
+  - name: "payments_high_latency_restart"
+    condition: "latency > 0.8"
+    action: "restart_container"
+    service: "payments"
+    cooldown: 300
+    enabled: true
+  
+  - name: "payments_high_cpu_alert"
+    condition: "cpu_usage > 88"
+    action: "alert"
+    service: "payments"
+    cooldown: 180
+    enabled: true
+  
+  - name: "payments_high_error_rate"
+    condition: "error_rate > 0.2"
+    action: "restart_container"
+    service: "payments"
+    cooldown: 300
+    enabled: true
+
+
