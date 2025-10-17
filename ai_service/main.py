@@ -28,6 +28,18 @@ class IncidentContext(BaseModel):
     services: list[str] | None = None
 
 
+import re
+
+def _clean_markdown(text: str) -> str:
+    """Clean up HTML tags and ensure proper markdown formatting"""
+    # Replace <br> tags with proper line breaks
+    text = re.sub(r'<br\s*/?>', '\n', text)
+    # Replace other common HTML tags
+    text = re.sub(r'<[^>]+>', '', text)
+    # Clean up extra whitespace
+    text = re.sub(r'\n\s*\n\s*\n', '\n\n', text)
+    return text.strip()
+
 def _llm(prompt: str, max_tokens: int = 400, temperature: float = 0.2) -> str:
     if not GROQ_API_KEY:
         return "AI disabled: set GROQ_API_KEY to enable responses."
@@ -36,13 +48,14 @@ def _llm(prompt: str, max_tokens: int = 400, temperature: float = 0.2) -> str:
         resp = client.chat.completions.create(
             model=GROQ_MODEL,
             messages=[
-                {"role": "system", "content": "You are a Site Reliability Engineering AI assistant. Provide concise, actionable responses focused on metrics, observability, and remediation. Use bullet points and be specific."},
+                {"role": "system", "content": "You are a Site Reliability Engineering AI assistant. Provide concise, actionable responses focused on metrics, observability, and remediation. Use proper markdown formatting with tables, bullet points, and line breaks. NEVER use HTML tags like <br> - use markdown formatting instead."},
                 {"role": "user", "content": prompt}
             ],
             temperature=temperature,
             max_tokens=max_tokens,
         )
-        return resp.choices[0].message.content or ""
+        result = resp.choices[0].message.content or ""
+        return _clean_markdown(result)
     # Fallback (no SDK). Keep disabled to avoid leaking keys via raw HTTP by default.
     return "AI client not available. Install groq SDK."
 
@@ -100,11 +113,17 @@ def summarize(ctx: IncidentContext):
         f"METRICS: {str(metrics)[:800]}\n"
         f"SERVICES: {str(services)[:300]}\n"
         f"LOGS: {str(logs)[:600]}\n\n"
-        "Format your response as:\n"
-        "KEY SIGNALS: [what metrics/logs show]\n"
-        "IMPACTED SERVICES: [list services]\n"
-        "SUSPECTED CAUSE: [likely root cause]\n"
-        "RECOMMENDED ACTIONS: [3-5 specific next steps]\n"
+        "Format your response using proper markdown:\n"
+        "## Key Signals\n"
+        "- [what metrics/logs show]\n\n"
+        "## Impacted Services\n"
+        "- [list services]\n\n"
+        "## Suspected Cause\n"
+        "[likely root cause]\n\n"
+        "## Recommended Actions\n"
+        "1. [action 1]\n"
+        "2. [action 2]\n"
+        "3. [action 3]\n"
     )
     answer = _llm(prompt, max_tokens=300)
     return {"summary": answer}
