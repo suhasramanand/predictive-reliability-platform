@@ -40,7 +40,7 @@ def _clean_markdown(text: str) -> str:
     text = re.sub(r'\n\s*\n\s*\n', '\n\n', text)
     return text.strip()
 
-def _llm(prompt: str, max_tokens: int = 400, temperature: float = 0.2) -> str:
+def _llm(prompt: str, max_tokens: int = 600, temperature: float = 0.2) -> str:
     if not GROQ_API_KEY:
         return "AI disabled: set GROQ_API_KEY to enable responses."
     if Groq:
@@ -125,7 +125,7 @@ def summarize(ctx: IncidentContext):
         "2. [action 2]\n"
         "3. [action 3]\n"
     )
-    answer = _llm(prompt, max_tokens=300)
+    answer = _llm(prompt, max_tokens=500)
     return {"summary": answer}
 
 
@@ -161,7 +161,7 @@ def rca(ctx: IncidentContext):
         "2. [investigation step]\n"
         "3. [prevention measure]\n"
     )
-    answer = _llm(prompt, max_tokens=400, temperature=0.1)
+    answer = _llm(prompt, max_tokens=600, temperature=0.1)
     return {"rca": answer}
 
 
@@ -188,7 +188,7 @@ def advice(inp: AdviceInput):
         '  "risk_level": "low|medium|high"\n'
         "}\n"
     )
-    answer = _llm(prompt, max_tokens=250, temperature=0.1)
+    answer = _llm(prompt, max_tokens=400, temperature=0.1)
     return {"advice": answer}
 
 

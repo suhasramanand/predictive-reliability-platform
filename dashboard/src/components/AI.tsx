@@ -182,7 +182,7 @@ export default function AI() {
               </button>
             </Tooltip>
             {chatResponse && (
-              <div className="mt-4 p-4 bg-gradient-to-br from-purple-50 to-indigo-50 rounded-lg border-2 border-purple-200">
+              <div className="mt-4 p-4 bg-gradient-to-br from-purple-50 to-indigo-50 rounded-lg border-2 border-purple-200 max-h-[500px] overflow-y-auto">
                 <div className="flex items-start space-x-3">
                   <svg className="w-6 h-6 text-purple-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -228,7 +228,7 @@ export default function AI() {
               </button>
             </Tooltip>
             {incidentSummary && (
-              <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+              <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200 max-h-[400px] overflow-y-auto">
                 <div className="prose prose-sm max-w-none text-gray-800">
                   <ReactMarkdown>{incidentSummary}</ReactMarkdown>
                 </div>
@@ -263,7 +263,7 @@ export default function AI() {
               </button>
             </Tooltip>
             {rca && (
-              <div className="mt-4 p-4 bg-orange-50 rounded-lg border border-orange-200">
+              <div className="mt-4 p-4 bg-orange-50 rounded-lg border border-orange-200 max-h-[400px] overflow-y-auto">
                 <div className="prose prose-sm max-w-none text-gray-800">
                   <ReactMarkdown>{rca}</ReactMarkdown>
                 </div>
