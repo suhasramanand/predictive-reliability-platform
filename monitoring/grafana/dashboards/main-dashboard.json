@@ -1,0 +1,118 @@
+{
+  "dashboard": {
+    "title": "Predictive Reliability Platform",
+    "uid": "predictive-reliability-main",
+    "version": 1,
+    "timezone": "browser",
+    "schemaVersion": 16,
+    "refresh": "10s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Service Health Overview",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 24, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "up{job=~\".*-service\"}",
+            "refId": "A"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Request Latency (p99)",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.99, rate(orders_latency_seconds_bucket[5m]))",
+            "legendFormat": "Orders",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(users_latency_seconds_bucket[5m]))",
+            "legendFormat": "Users",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(payments_latency_seconds_bucket[5m]))",
+            "legendFormat": "Payments",
+            "refId": "C"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Error Rate",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+        "targets": [
+          {
+            "expr": "rate(orders_errors_total[5m])",
+            "legendFormat": "Orders",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(users_errors_total[5m])",
+            "legendFormat": "Users",
+            "refId": "B"
+          },
+          {
+            "expr": "rate(payments_errors_total[5m])",
+            "legendFormat": "Payments",
+            "refId": "C"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "CPU Usage",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+        "targets": [
+          {
+            "expr": "orders_cpu_usage_percent",
+            "legendFormat": "Orders",
+            "refId": "A"
+          },
+          {
+            "expr": "users_cpu_usage_percent",
+            "legendFormat": "Users",
+            "refId": "B"
+          },
+          {
+            "expr": "payments_cpu_usage_percent",
+            "legendFormat": "Payments",
+            "refId": "C"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Request Rate",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+        "targets": [
+          {
+            "expr": "rate(orders_total[5m])",
+            "legendFormat": "Orders",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(users_total[5m])",
+            "legendFormat": "Users",
+            "refId": "B"
+          },
+          {
+            "expr": "rate(payments_total[5m])",
+            "legendFormat": "Payments",
+            "refId": "C"
+          }
+        ]
+      }
+    ]
+  }
+}
+
+
