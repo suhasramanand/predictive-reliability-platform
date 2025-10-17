@@ -12,6 +12,7 @@ This platform demonstrates an end-to-end Site Reliability Engineering (SRE) solu
 - **Complete Observability Stack**: Metrics (Prometheus), Logs (Loki), Traces (Jaeger)
 - **Live Dashboard**: Modern React UI for monitoring and control
 - **Chaos Engineering**: Built-in failure injection for testing resilience
+- **AI-Powered Intelligence**: LLM-driven root cause analysis, incident summarization, and remediation advice
 
 ### Screenshots
 
@@ -112,6 +113,7 @@ See [Dashboard Screenshots](#screenshots) above for visual examples.
 - **Grafana** (3001): Visualization and dashboards (admin/admin)
 - **Loki** (3100): Log aggregation
 - **Jaeger** (16686): Distributed tracing
+- **AI Service** (8090): LLM-powered intelligence (requires GROQ_API_KEY)
 
 **Monitoring Tools**
 
@@ -134,6 +136,22 @@ Python-based tool for injecting failures:
 - Chaos engineering experiments
 
 See the [chaos_simulator/README.md](chaos_simulator/README.md) for detailed usage.
+
+### AI Service (Port 8090) - NEW
+LLM-powered intelligence layer using Groq API:
+- **Natural Language Queries**: Ask questions about your system in plain English
+- **Incident Summarization**: Auto-generate incident reports from metrics, logs, and traces
+- **Root Cause Analysis**: AI identifies likely failure subsystems from observability data
+- **Remediation Advice**: LLM recommends best corrective actions with rationale
+
+**Endpoints:**
+- `POST /chat` - General SRE Q&A with context
+- `POST /summarize` - Generate incident summary from observability data
+- `POST /rca` - Root cause analysis from logs and metrics correlation
+- `POST /advice` - Remediation action recommendation
+
+**Configuration:**
+Set the `GROQ_API_KEY` environment variable to enable AI features. See [AI Configuration](#ai-configuration) below.
 
 ## API Documentation
 
@@ -203,6 +221,7 @@ Wait 30-60 seconds for all services to initialize.
 - **Jaeger**: http://localhost:16686
 - **Anomaly API Docs**: http://localhost:8080/docs
 - **Policy Engine API Docs**: http://localhost:8081/docs
+- **AI Service API Docs**: http://localhost:8090/docs
 
 ### 3. Generate Traffic & Trigger Anomalies
 
@@ -397,6 +416,57 @@ detector = SimpleAnomalyDetector(
 
 Lower sensitivity = more anomalies detected  
 Higher sensitivity = only severe anomalies
+
+### AI Configuration
+
+The AI service requires a Groq API key to enable LLM-powered features.
+
+**Option 1: Environment Variable (Recommended for Production)**
+```bash
+export GROQ_API_KEY="your-groq-api-key-here"
+docker compose up -d
+```
+
+**Option 2: .env File (Local Development)**
+```bash
+# Create .env file in project root
+echo "GROQ_API_KEY=your-groq-api-key-here" > .env
+
+# Start with env file
+docker compose --env-file .env up -d
+```
+
+**Option 3: GitHub Secrets (CI/CD)**
+```bash
+# Add secret to GitHub repository
+gh secret set GROQ_API_KEY -b"your-groq-api-key-here" -R suhasramanand/predictive-reliability-platform
+
+# Or via GitHub UI:
+# Repository → Settings → Secrets and variables → Actions → New repository secret
+```
+
+**Verify AI Service:**
+```bash
+curl http://localhost:8090/health
+# Expected: {"status":"healthy","service":"ai-service"}
+
+# Test chat endpoint
+curl -X POST http://localhost:8090/chat \
+  -H "Content-Type: application/json" \
+  -d '{"query":"What is SRE?"}'
+```
+
+**Without GROQ_API_KEY:**
+- AI features will be disabled gracefully
+- Dashboard will show "AI Unavailable" status
+- All other platform features continue to work normally
+
+**Getting a Groq API Key:**
+1. Visit https://console.groq.com
+2. Sign up for a free account
+3. Navigate to API Keys
+4. Create a new API key
+5. Copy and set as environment variable
 
 ## Troubleshooting
 
