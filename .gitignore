@@ -45,6 +45,11 @@ logs/
 .env.local
 .env.*.local
 
+# Auth data
+auth_service/data/
+webhook_service/data/
+**/data/api_keys.json
+
 # Testing
 .pytest_cache/
 htmlcov/
