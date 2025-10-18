@@ -15,6 +15,127 @@ function Tooltip({ children, text }: { children: React.ReactNode; text: string }
   )
 }
 
+// Enhanced Markdown Renderer with Table Parsing
+interface TableData {
+  headers: string[]
+  rows: string[][]
+}
+
+function parseMarkdownTable(text: string): TableData | null {
+  const lines = text.trim().split('\n')
+  const tableLines = lines.filter(line => line.trim().startsWith('|'))
+  
+  if (tableLines.length < 2) return null
+  
+  const headers = tableLines[0]
+    .split('|')
+    .map(h => h.trim())
+    .filter(h => h.length > 0)
+  
+  // Skip separator line (usually contains dashes)
+  const dataLines = tableLines.slice(2)
+  const rows = dataLines.map(line =>
+    line.split('|').map(cell => cell.trim()).filter(cell => cell.length > 0)
+  )
+  
+  return { headers, rows }
+}
+
+function AIResponse({ content }: { content: string }) {
+  // Extract tables and text
+  const parts: Array<{ type: 'text' | 'table'; content: string | TableData }> = []
+  const lines = content.split('\n')
+  let currentText: string[] = []
+  let inTable = false
+  let tableLines: string[] = []
+  
+  lines.forEach((line, idx) => {
+    const isTableLine = line.trim().startsWith('|')
+    
+    if (isTableLine) {
+      if (!inTable) {
+        // Start of table - flush text
+        if (currentText.length > 0) {
+          parts.push({ type: 'text', content: currentText.join('\n') })
+          currentText = []
+        }
+        inTable = true
+      }
+      tableLines.push(line)
+    } else {
+      if (inTable) {
+        // End of table - parse it
+        const table = parseMarkdownTable(tableLines.join('\n'))
+        if (table) {
+          parts.push({ type: 'table', content: table })
+        }
+        tableLines = []
+        inTable = false
+      }
+      currentText.push(line)
+    }
+    
+    // Handle last table
+    if (idx === lines.length - 1 && inTable) {
+      const table = parseMarkdownTable(tableLines.join('\n'))
+      if (table) {
+        parts.push({ type: 'table', content: table })
+      }
+    }
+  })
+  
+  // Flush remaining text
+  if (currentText.length > 0) {
+    parts.push({ type: 'text', content: currentText.join('\n') })
+  }
+  
+  return (
+    <div className="space-y-4">
+      {parts.map((part, idx) => (
+        part.type === 'table' ? (
+          <div key={idx} className="overflow-x-auto">
+            <table className="min-w-full border-collapse border border-gray-300 shadow-sm">
+              <thead className="bg-gradient-to-b from-gray-100 to-gray-200">
+                <tr>
+                  {(part.content as TableData).headers.map((header, hIdx) => (
+                    <th
+                      key={hIdx}
+                      className="px-4 py-3 text-left text-sm font-semibold text-gray-900 border border-gray-300"
+                    >
+                      {header}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {(part.content as TableData).rows.map((row, rIdx) => (
+                  <tr
+                    key={rIdx}
+                    className={`${rIdx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-blue-50 transition-colors`}
+                  >
+                    {row.map((cell, cIdx) => (
+                      <td
+                        key={cIdx}
+                        className="px-4 py-3 text-sm text-gray-800 border border-gray-300"
+                      >
+                        {cell}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div key={idx} className="prose prose-sm max-w-none">
+            <ReactMarkdown>{part.content as string}</ReactMarkdown>
+          </div>
+        )
+      ))}
+    </div>
+  )
+}
+
 export default function AI() {
   const [chatQuery, setChatQuery] = useState('')
   const [chatResponse, setChatResponse] = useState('')
@@ -189,9 +310,7 @@ export default function AI() {
                   </svg>
                   <div className="flex-1">
                     <h4 className="font-semibold text-purple-900 mb-2">AI Response:</h4>
-                    <div className="prose prose-sm max-w-none text-gray-800">
-                      <ReactMarkdown>{chatResponse}</ReactMarkdown>
-                    </div>
+                    <AIResponse content={chatResponse} />
                   </div>
                 </div>
               </div>
@@ -229,9 +348,7 @@ export default function AI() {
             </Tooltip>
             {incidentSummary && (
               <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200 max-h-[400px] overflow-y-auto">
-                <div className="prose prose-sm max-w-none text-gray-800">
-                  <ReactMarkdown>{incidentSummary}</ReactMarkdown>
-                </div>
+                <AIResponse content={incidentSummary} />
               </div>
             )}
           </div>
@@ -264,9 +381,7 @@ export default function AI() {
             </Tooltip>
             {rca && (
               <div className="mt-4 p-4 bg-orange-50 rounded-lg border border-orange-200 max-h-[400px] overflow-y-auto">
-                <div className="prose prose-sm max-w-none text-gray-800">
-                  <ReactMarkdown>{rca}</ReactMarkdown>
-                </div>
+                <AIResponse content={rca} />
               </div>
             )}
           </div>

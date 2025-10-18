@@ -40,7 +40,7 @@ def _clean_markdown(text: str) -> str:
     text = re.sub(r'\n\s*\n\s*\n', '\n\n', text)
     return text.strip()
 
-def _llm(prompt: str, max_tokens: int = 600, temperature: float = 0.2) -> str:
+def _llm(prompt: str, max_tokens: int = 400, temperature: float = 0.2) -> str:
     if not GROQ_API_KEY:
         return "AI disabled: set GROQ_API_KEY to enable responses."
     if Groq:
@@ -48,7 +48,19 @@ def _llm(prompt: str, max_tokens: int = 600, temperature: float = 0.2) -> str:
         resp = client.chat.completions.create(
             model=GROQ_MODEL,
             messages=[
-                {"role": "system", "content": "You are a Site Reliability Engineering AI assistant. Provide concise, actionable responses focused on metrics, observability, and remediation. Use proper markdown formatting with tables, bullet points, and line breaks. NEVER use HTML tags like <br> - use markdown formatting instead."},
+                {"role": "system", "content": """You are a Site Reliability Engineering AI assistant. Be EXTREMELY CONCISE. Provide only essential information.
+
+FORMATTING RULES:
+1. Use proper markdown tables with | separators
+2. Keep responses SHORT - 3-5 sentences max
+3. Tables should be compact with only critical columns
+4. No emojis, no special unicode characters
+5. Use bullet points (-) for lists, max 3-4 items
+6. Use ## for section headers
+7. Never use HTML tags (no <br>, <b>, etc)
+8. Use plain text for status indicators (OK, ERROR, WARNING)
+9. NO lengthy explanations - be direct and actionable
+10. Skip introductory phrases - get straight to the point"""},
                 {"role": "user", "content": prompt}
             ],
             temperature=temperature,
@@ -95,38 +107,25 @@ def health():
 
 @app.post("/chat")
 def chat(req: ChatRequest):
-    prompt = req.query
-    if req.context:
-        prompt += "\nContext:\n" + str(req.context)
-    answer = _llm(prompt)
+    ctx = ", ".join(req.context.get("services", [])) if req.context else ""
+    prompt = f"User asked: {req.query}\n\nServices: {ctx if ctx else 'orders, users, payments'}.\n\nAnswer in 3-4 sentences max. Use a table if showing data."
+    answer = _llm(prompt, max_tokens=300)
     return {"answer": answer}
 
 
 @app.post("/summarize")
 def summarize(ctx: IncidentContext):
-    # Simple heuristic summary assembled from observability backends
-    metrics = _prom(f"rate(http_requests_total[5m])")
-    services = _jaeger_services()
-    logs = _loki('{job="orders-service"}')
+    logs = _loki('{job=~"orders-service|users-service|payments-service"}', limit=50)
+    metrics = _prom("sum by (job)(rate(http_requests_total[5m]))")
+    
     prompt = (
-        f"Analyze this {ctx.time_range} incident data and provide a brief summary (max 200 words).\n\n"
-        f"METRICS: {str(metrics)[:800]}\n"
-        f"SERVICES: {str(services)[:300]}\n"
-        f"LOGS: {str(logs)[:600]}\n\n"
-        "Format your response using proper markdown:\n"
-        "## Key Signals\n"
-        "- [what metrics/logs show]\n\n"
-        "## Impacted Services\n"
-        "- [list services]\n\n"
-        "## Suspected Cause\n"
-        "[likely root cause]\n\n"
-        "## Recommended Actions\n"
-        "1. [action 1]\n"
-        "2. [action 2]\n"
-        "3. [action 3]\n"
+        f"Incident summary for last {ctx.time_range}.\n\n"
+        f"METRICS: {str(metrics)[:300]}\n"
+        f"LOGS: {str(logs)[:400]}\n\n"
+        "Provide 4-5 bullet points covering: affected services, symptoms, status, next steps."
     )
-    answer = _llm(prompt, max_tokens=500)
-    return {"summary": answer}
+    summary = _llm(prompt, max_tokens=250, temperature=0.1)
+    return {"summary": summary}
 
 
 @app.post("/rca")
@@ -137,31 +136,22 @@ def rca(ctx: IncidentContext):
     error_metrics = _prom("rate(http_requests_total{status=~'5..'}[5m])")
     
     prompt = (
-        f"Perform root cause analysis for a {ctx.time_range} incident window.\n\n"
-        f"REQUEST RATES: {str(metrics)[:500]}\n"
-        f"CPU METRICS: {str(cpu_metrics)[:500]}\n"
-        f"ERROR RATES: {str(error_metrics)[:500]}\n"
-        f"LOG SAMPLE: {str(logs)[:700]}\n\n"
-        "Analyze the data and provide a structured RCA report in markdown format:\n\n"
-        "## Root Cause Analysis\n\n"
-        "### Suspected Service\n"
-        "[service name or component]\n\n"
-        "### Confidence Level\n"
-        "[confidence percentage]\n\n"
-        "### Key Evidence\n"
-        "- [evidence 1]\n"
-        "- [evidence 2]\n"
-        "- [evidence 3]\n\n"
-        "### Likely Causes\n"
-        "1. [cause 1]\n"
-        "2. [cause 2]\n"
-        "3. [cause 3]\n\n"
-        "### Recommended Actions\n"
-        "1. [immediate action]\n"
-        "2. [investigation step]\n"
-        "3. [prevention measure]\n"
+        f"RCA for {ctx.time_range} incident.\n\n"
+        f"REQUESTS: {str(metrics)[:300]}\n"
+        f"CPU: {str(cpu_metrics)[:300]}\n"
+        f"ERRORS: {str(error_metrics)[:300]}\n"
+        f"LOGS: {str(logs)[:400]}\n\n"
+        "Provide:\n"
+        "## Suspected Service\n"
+        "[name] (confidence: X%)\n\n"
+        "## Evidence\n"
+        "- [3 key points max]\n\n"
+        "## Actions\n"
+        "1. [immediate]\n"
+        "2. [next step]\n"
+        "3. [prevention]\n"
     )
-    answer = _llm(prompt, max_tokens=600, temperature=0.1)
+    answer = _llm(prompt, max_tokens=350, temperature=0.1)
     return {"rca": answer}
 
 
