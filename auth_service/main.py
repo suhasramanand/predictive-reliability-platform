@@ -142,14 +142,25 @@ async def startup():
         admin_hash = hash_key(admin_key)
         api_keys_db[admin_hash] = {
             "name": "admin",
-            "description": "Default admin key",
+            "description": "Default admin key - auto-generated",
             "scopes": ["read", "write", "admin"],
-            "created_at": datetime.utcnow().isoformat(),
-            "original_key": admin_key  # Only for first time
+            "created_at": datetime.utcnow().isoformat()
+            # NEVER store the original key - security risk!
         }
         save_api_keys()
-        print(f"⚠️  IMPORTANT: Admin API Key created: {admin_key}")
-        print(f"   Save this key - it won't be shown again!")
+        print(f"")
+        print(f"╔═══════════════════════════════════════════════════════════════╗")
+        print(f"║  ⚠️  ADMIN API KEY GENERATED - SAVE THIS SECURELY!           ║")
+        print(f"╚═══════════════════════════════════════════════════════════════╝")
+        print(f"")
+        print(f"   API Key: {admin_key}")
+        print(f"")
+        print(f"   This key will NOT be shown again!")
+        print(f"   Store it in a password manager or secure location.")
+        print(f"")
+        print(f"   Use this key to create additional API keys via:")
+        print(f"   POST /keys with X-API-Key header")
+        print(f"")
 
 @app.get("/health")
 async def health():
