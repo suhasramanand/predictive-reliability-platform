@@ -10,8 +10,9 @@ from datetime import datetime
 from typing import List, Dict, Optional
 import docker
 import requests
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+import uuid
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -59,24 +60,44 @@ class PolicyStatus(BaseModel):
     actions_executed: int
     last_check: Optional[str]
 
+# In-memory policy storage (will be DB in future)
+policies_storage: Dict[str, Policy] = {}
+policies_file_path = "/app/policies.yml"
+
 # Load policies
 def load_policies() -> List[Policy]:
     """Load policies from YAML file"""
-    policies_file = "/app/policies.yml"
+    global policies_storage
     
-    if not os.path.exists(policies_file):
-        logger.warning(f"Policies file not found: {policies_file}")
-        return get_default_policies()
+    if not os.path.exists(policies_file_path):
+        logger.warning(f"Policies file not found: {policies_file_path}")
+        policies_list = get_default_policies()
+    else:
+        try:
+            with open(policies_file_path, 'r') as f:
+                data = yaml.safe_load(f)
+                policies_list = [Policy(**p) for p in data.get('policies', [])]
+                logger.info(f"Loaded {len(policies_list)} policies from {policies_file_path}")
+        except Exception as e:
+            logger.error(f"Error loading policies: {e}")
+            policies_list = get_default_policies()
     
+    # Store in memory with IDs
+    for idx, policy in enumerate(policies_list):
+        policy_id = f"policy_{policy.name}_{idx}"
+        policies_storage[policy_id] = policy
+    
+    return policies_list
+
+def save_policies():
+    """Save policies back to YAML file"""
     try:
-        with open(policies_file, 'r') as f:
-            data = yaml.safe_load(f)
-            policies = [Policy(**p) for p in data.get('policies', [])]
-            logger.info(f"Loaded {len(policies)} policies from {policies_file}")
-            return policies
+        policies_list = [p.dict() for p in policies_storage.values()]
+        with open(policies_file_path, 'w') as f:
+            yaml.dump({'policies': policies_list}, f, default_flow_style=False)
+        logger.info(f"Saved {len(policies_list)} policies to {policies_file_path}")
     except Exception as e:
-        logger.error(f"Error loading policies: {e}")
-        return get_default_policies()
+        logger.error(f"Error saving policies: {e}")
 
 def get_default_policies() -> List[Policy]:
     """Return default policies"""
@@ -331,7 +352,73 @@ async def get_status():
 @app.get("/policies")
 async def get_policies():
     """Get all policies"""
-    return {"policies": policies, "count": len(policies)}
+    policies_list = []
+    for policy_id, policy in policies_storage.items():
+        policy_dict = policy.dict()
+        policy_dict['id'] = policy_id
+        policies_list.append(policy_dict)
+    return {"policies": policies_list if policies_list else policies, "count": len(policies_list) if policies_list else len(policies)}
+
+@app.get("/policies/{policy_id}")
+async def get_policy(policy_id: str):
+    """Get a specific policy by ID"""
+    if policy_id not in policies_storage:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    
+    policy_dict = policies_storage[policy_id].dict()
+    policy_dict['id'] = policy_id
+    return policy_dict
+
+@app.post("/policies")
+async def create_policy(policy: Policy):
+    """Create a new policy"""
+    import uuid
+    policy_id = f"policy_{uuid.uuid4().hex[:8]}"
+    policies_storage[policy_id] = policy
+    save_policies()
+    
+    logger.info(f"Created new policy: {policy_id} - {policy.name}")
+    
+    return {
+        "id": policy_id,
+        "status": "created",
+        "policy": {**policy.dict(), "id": policy_id}
+    }
+
+@app.put("/policies/{policy_id}")
+async def update_policy(policy_id: str, policy: Policy):
+    """Update an existing policy"""
+    if policy_id not in policies_storage:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    
+    policies_storage[policy_id] = policy
+    save_policies()
+    
+    logger.info(f"Updated policy: {policy_id} - {policy.name}")
+    
+    return {
+        "id": policy_id,
+        "status": "updated",
+        "policy": {**policy.dict(), "id": policy_id}
+    }
+
+@app.delete("/policies/{policy_id}")
+async def delete_policy(policy_id: str):
+    """Delete a policy"""
+    if policy_id not in policies_storage:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    
+    policy_name = policies_storage[policy_id].name
+    del policies_storage[policy_id]
+    save_policies()
+    
+    logger.info(f"Deleted policy: {policy_id} - {policy_name}")
+    
+    return {
+        "id": policy_id,
+        "status": "deleted",
+        "name": policy_name
+    }
 
 @app.get("/actions")
 async def get_actions():
@@ -378,6 +465,97 @@ async def manual_evaluation():
             actions_taken.append(action)
     
     return {"message": "Evaluation complete", "actions": actions_taken}
+
+@app.post("/actions/execute")
+async def execute_action_manually(action_request: dict):
+    """Manually execute a remediation action"""
+    action_type = action_request.get("action")
+    service = action_request.get("service")
+    reason = action_request.get("reason", "Manual execution")
+    parameters = action_request.get("parameters", {})
+    
+    if not action_type or not service:
+        raise HTTPException(status_code=400, detail="action and service are required")
+    
+    action_id = f"action_{uuid.uuid4().hex[:8]}"
+    
+    # Create fake policy for execution
+    fake_policy = Policy(
+        name="manual_action",
+        condition="true",
+        action=action_type,
+        service=service,
+        enabled=True
+    )
+    
+    # Execute action
+    try:
+        result = execute_action(fake_policy, reason)
+        result['action_id'] = action_id
+        result['initiated_by'] = "manual_api"
+        result['parameters'] = parameters
+        
+        logger.info(f"Manual action executed: {action_id} - {action_type} on {service}")
+        
+        return {
+            "action_id": action_id,
+            "status": "executed" if result.get('status') == 'success' else "failed",
+            "action": action_type,
+            "service": service,
+            "result": result,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error executing manual action: {e}")
+        return {
+            "action_id": action_id,
+            "status": "failed",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+@app.get("/actions/{action_id}/status")
+async def get_action_status(action_id: str):
+    """Get status of a specific action"""
+    # Find action in history
+    for action in action_history:
+        if action.get('action_id') == action_id:
+            return {
+                "action_id": action_id,
+                "status": action.get('status'),
+                "action": action.get('action'),
+                "service": action.get('service'),
+                "timestamp": action.get('timestamp'),
+                "details": action.get('details')
+            }
+    
+    raise HTTPException(status_code=404, detail="Action not found")
+
+@app.get("/actions/history")
+async def get_action_history(
+    service: Optional[str] = None,
+    action: Optional[str] = None,
+    limit: int = 50
+):
+    """Get action history with filtering"""
+    filtered = action_history
+    
+    # Filter by service
+    if service:
+        filtered = [a for a in filtered if a.get('service') == service]
+    
+    # Filter by action type
+    if action:
+        filtered = [a for a in filtered if a.get('action') == action]
+    
+    # Apply limit
+    filtered = list(reversed(filtered))[:limit]
+    
+    return {
+        "actions": filtered,
+        "total": len(filtered),
+        "filters": {"service": service, "action": action, "limit": limit}
+    }
 
 @app.post("/toggle")
 async def toggle_auto_remediation():

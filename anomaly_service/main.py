@@ -8,10 +8,15 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 import numpy as np
-from fastapi import FastAPI, BackgroundTasks
+import pandas as pd
+from fastapi import FastAPI, BackgroundTasks, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 import requests
 from collections import defaultdict, deque
+from sklearn.ensemble import IsolationForest
+from sklearn.preprocessing import StandardScaler
+from prophet import Prophet
+import json
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -27,6 +32,9 @@ CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "30"))  # seconds
 metric_history = defaultdict(lambda: deque(maxlen=100))
 anomalies = []
 predictions = {}
+
+# WebSocket connections
+active_connections: List[WebSocket] = []
 
 class AnomalyPrediction(BaseModel):
     service: str
@@ -94,7 +102,138 @@ class SimpleAnomalyDetector:
         
         return is_anomaly, confidence, expected_range
 
+# ML-based anomaly detection
+class MLAnomalyDetector:
+    """Uses Isolation Forest for ML-based anomaly detection"""
+    
+    def __init__(self, contamination=0.1):
+        self.model = IsolationForest(contamination=contamination, random_state=42)
+        self.scaler = StandardScaler()
+        self.is_trained = False
+        self.min_training_samples = 50
+    
+    def train(self, historical_data: np.ndarray):
+        """Train the model on historical data"""
+        if len(historical_data) < self.min_training_samples:
+            return False
+        
+        try:
+            # Scale features
+            scaled_data = self.scaler.fit_transform(historical_data.reshape(-1, 1))
+            
+            # Train model
+            self.model.fit(scaled_data)
+            self.is_trained = True
+            logger.info(f"ML model trained on {len(historical_data)} samples")
+            return True
+        except Exception as e:
+            logger.error(f"Error training ML model: {e}")
+            return False
+    
+    def detect(self, values: List[float], current_value: float) -> tuple[bool, float, dict]:
+        """Detect anomalies using trained ML model"""
+        # Train if not trained yet and enough data
+        if not self.is_trained and len(values) >= self.min_training_samples:
+            self.train(np.array(values))
+        
+        # Fall back to statistics if not trained
+        if not self.is_trained:
+            return False, 0.0, {"min": 0, "max": 0, "mean": 0, "method": "insufficient_data"}
+        
+        try:
+            # Predict
+            scaled_value = self.scaler.transform(np.array([[current_value]]))
+            prediction = self.model.predict(scaled_value)[0]
+            anomaly_score = self.model.score_samples(scaled_value)[0]
+            
+            is_anomaly = (prediction == -1)
+            confidence = min(0.95, abs(anomaly_score) / 10) if is_anomaly else 0.0
+            
+            # Calculate expected range from training data
+            mean = np.mean(values[-20:])
+            std = np.std(values[-20:])
+            
+            return is_anomaly, confidence, {
+                "min": float(mean - 2 * std),
+                "max": float(mean + 2 * std),
+                "mean": float(mean),
+                "method": "isolation_forest",
+                "anomaly_score": float(anomaly_score)
+            }
+        except Exception as e:
+            logger.error(f"Error in ML detection: {e}")
+            return False, 0.0, {"method": "error"}
+
+# Time-series forecasting
+class TimeSeriesForecaster:
+    """Uses Prophet for time-series forecasting"""
+    
+    def __init__(self):
+        self.models = {}  # One model per metric
+        self.min_training_samples = 100
+    
+    def forecast(self, metric_key: str, historical_data: List[tuple], periods=24) -> Optional[dict]:
+        """
+        Forecast future values
+        historical_data: List of (timestamp, value) tuples
+        periods: Number of hours to forecast ahead
+        """
+        if len(historical_data) < self.min_training_samples:
+            return None
+        
+        try:
+            # Prepare data for Prophet
+            df = pd.DataFrame(historical_data, columns=['ds', 'y'])
+            df['ds'] = pd.to_datetime(df['ds'])
+            
+            # Train model
+            model = Prophet(
+                daily_seasonality=True,
+                weekly_seasonality=False,
+                yearly_seasonality=False,
+                interval_width=0.95
+            )
+            model.fit(df)
+            
+            # Forecast
+            future = model.make_future_dataframe(periods=periods, freq='H')
+            forecast = model.predict(future)
+            
+            # Get predictions for future periods
+            future_predictions = forecast.tail(periods)
+            
+            # Check if any forecasted value will breach threshold
+            max_forecasted = future_predictions['yhat'].max()
+            will_breach = max_forecasted > (df['y'].mean() + 2 * df['y'].std())
+            
+            if will_breach:
+                breach_time = future_predictions[
+                    future_predictions['yhat'] > (df['y'].mean() + 2 * df['y'].std())
+                ]['ds'].iloc[0] if len(future_predictions[future_predictions['yhat'] > (df['y'].mean() + 2 * df['y'].std())]) > 0 else None
+            else:
+                breach_time = None
+            
+            return {
+                "metric": metric_key,
+                "current": float(df['y'].iloc[-1]),
+                "forecasted_max": float(max_forecasted),
+                "will_breach": will_breach,
+                "breach_time": breach_time.isoformat() if breach_time else None,
+                "forecast_horizon": f"{periods}h",
+                "confidence": 0.85,
+                "method": "prophet"
+            }
+        except Exception as e:
+            logger.error(f"Error forecasting {metric_key}: {e}")
+            return None
+
+# Initialize detectors
 detector = SimpleAnomalyDetector()
+ml_detector = MLAnomalyDetector()
+forecaster = TimeSeriesForecaster()
+
+# Toggle for ML vs statistical
+USE_ML_DETECTION = os.getenv("USE_ML_DETECTION", "false").lower() == "true"
 
 def query_prometheus(query: str) -> Optional[List[Dict]]:
     """Query Prometheus API"""
@@ -128,11 +267,19 @@ def analyze_metric(service: str, metric_name: str, query: str) -> Optional[Anoma
         # Store historical data
         metric_history[metric_key].append(current_value)
         
-        # Detect anomaly
-        is_anomaly, confidence, expected_range = detector.detect(
-            list(metric_history[metric_key]),
-            current_value
-        )
+        # Choose detector based on configuration
+        if USE_ML_DETECTION:
+            is_anomaly, confidence, expected_range = ml_detector.detect(
+                list(metric_history[metric_key]),
+                current_value
+            )
+            detection_method = expected_range.get('method', 'ml')
+        else:
+            is_anomaly, confidence, expected_range = detector.detect(
+                list(metric_history[metric_key]),
+                current_value
+            )
+            detection_method = 'statistical'
         
         # Determine severity
         if not is_anomaly:
@@ -146,7 +293,7 @@ def analyze_metric(service: str, metric_name: str, query: str) -> Optional[Anoma
         
         prediction = AnomalyPrediction(
             service=service,
-            metric=metric_name,
+            metric=f"{metric_name} ({detection_method})",
             current_value=current_value,
             expected_range=expected_range,
             anomaly=is_anomaly,
@@ -216,9 +363,34 @@ async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "service": "anomaly-detection"}
 
+@app.get("/anomalies", response_model=AnomalyResponse)
+async def get_anomalies(
+    service: Optional[str] = None,
+    severity: Optional[str] = None,
+    limit: int = 50
+):
+    """Get current anomalies with filtering"""
+    filtered = anomalies
+    
+    # Filter by service
+    if service:
+        filtered = [a for a in filtered if a.service == service]
+    
+    # Filter by severity
+    if severity:
+        filtered = [a for a in filtered if a.severity == severity]
+    
+    # Apply limit
+    filtered = filtered[:limit]
+    
+    return AnomalyResponse(
+        anomalies=filtered,
+        count=len(filtered)
+    )
+
 @app.get("/predict", response_model=AnomalyResponse)
 async def get_predictions():
-    """Get current anomaly predictions"""
+    """Get current anomaly predictions (legacy endpoint)"""
     return AnomalyResponse(
         anomalies=anomalies,
         count=len(anomalies)
@@ -310,6 +482,126 @@ async def manual_detection():
         anomalies=anomalies,
         count=len(anomalies)
     )
+
+@app.post("/forecast")
+async def forecast_metrics(request: dict):
+    """Forecast future metric values using Prophet"""
+    service = request.get("service")
+    metric_name = request.get("metric", "cpu_usage")
+    periods = request.get("periods", 24)  # hours
+    
+    if not service:
+        raise HTTPException(status_code=400, detail="service is required")
+    
+    metric_key = f"{service}_{metric_name}"
+    
+    # Get historical data with timestamps
+    historical_data = []
+    if metric_key in metric_history:
+        history = list(metric_history[metric_key])
+        # Create timestamps (assuming 30s intervals)
+        base_time = datetime.utcnow() - timedelta(seconds=len(history) * 30)
+        for i, value in enumerate(history):
+            ts = base_time + timedelta(seconds=i * 30)
+            historical_data.append((ts, value))
+    
+    if not historical_data:
+        return {
+            "error": "No historical data available for forecasting",
+            "service": service,
+            "metric": metric_name
+        }
+    
+    # Forecast
+    forecast_result = forecaster.forecast(metric_key, historical_data, periods=periods)
+    
+    if forecast_result:
+        return forecast_result
+    else:
+        return {
+            "error": "Insufficient data for forecasting (need 100+ data points)",
+            "service": service,
+            "metric": metric_name,
+            "data_points": len(historical_data)
+        }
+
+@app.post("/ml/toggle")
+async def toggle_ml_detection():
+    """Toggle between ML and statistical detection"""
+    global USE_ML_DETECTION
+    USE_ML_DETECTION = not USE_ML_DETECTION
+    logger.info(f"Detection method: {'ML (Isolation Forest)' if USE_ML_DETECTION else 'Statistical (Z-score)'}")
+    return {
+        "ml_enabled": USE_ML_DETECTION,
+        "method": "isolation_forest" if USE_ML_DETECTION else "statistical"
+    }
+
+@app.get("/ml/status")
+async def get_ml_status():
+    """Get ML model status"""
+    return {
+        "ml_enabled": USE_ML_DETECTION,
+        "ml_model_trained": ml_detector.is_trained,
+        "detection_method": "isolation_forest" if USE_ML_DETECTION else "statistical",
+        "training_samples_required": ml_detector.min_training_samples,
+        "forecasting_available": True,
+        "forecasting_samples_required": forecaster.min_training_samples
+    }
+
+@app.websocket("/stream/anomalies")
+async def websocket_anomalies(websocket: WebSocket):
+    """WebSocket endpoint for streaming anomalies in real-time"""
+    await websocket.accept()
+    active_connections.append(websocket)
+    logger.info(f"WebSocket client connected. Total connections: {len(active_connections)}")
+    
+    try:
+        # Send initial anomalies
+        await websocket.send_json({
+            "event": "connected",
+            "anomalies": [a.dict() for a in anomalies],
+            "timestamp": datetime.utcnow().isoformat()
+        })
+        
+        last_sent_anomalies = set()
+        
+        # Stream updates
+        while True:
+            # Send new anomalies
+            current_anomaly_ids = set()
+            for anomaly in anomalies:
+                anomaly_id = f"{anomaly.service}_{anomaly.metric}_{anomaly.timestamp}"
+                current_anomaly_ids.add(anomaly_id)
+                
+                if anomaly_id not in last_sent_anomalies:
+                    await websocket.send_json({
+                        "event": "anomaly.detected",
+                        "anomaly": anomaly.dict(),
+                        "timestamp": datetime.utcnow().isoformat()
+                    })
+            
+            last_sent_anomalies = current_anomaly_ids
+            
+            # Wait before next update
+            await asyncio.sleep(5)
+            
+    except WebSocketDisconnect:
+        logger.info("WebSocket client disconnected")
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+    finally:
+        if websocket in active_connections:
+            active_connections.remove(websocket)
+        logger.info(f"Client removed. Total connections: {len(active_connections)}")
+
+@app.get("/stream/status")
+async def get_stream_status():
+    """Get streaming status"""
+    return {
+        "active_connections": len(active_connections),
+        "websocket_url": "ws://localhost:8080/stream/anomalies",
+        "supported_events": ["connected", "anomaly.detected"]
+    }
 
 if __name__ == "__main__":
     import uvicorn

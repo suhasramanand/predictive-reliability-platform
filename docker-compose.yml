@@ -59,7 +59,7 @@ services:
       - jaeger
     restart: unless-stopped
 
-  # Anomaly Detection Service
+  # Anomaly Detection Service (with ML)
   anomaly-service:
     build:
       context: ./anomaly_service
@@ -70,6 +70,7 @@ services:
       - PORT=8080
       - PROMETHEUS_URL=http://prometheus:9090
       - CHECK_INTERVAL=30
+      - USE_ML_DETECTION=${USE_ML_DETECTION:-false}
     networks:
       - reliability-net
     depends_on:
@@ -185,6 +186,42 @@ services:
       - loki
       - jaeger
     restart: unless-stopped
+
+  # Authentication Service
+  auth-service:
+    build:
+      context: ./auth_service
+    container_name: auth-service
+    ports:
+      - "8089:8089"
+    environment:
+      - PORT=8089
+      - API_KEYS_FILE=/app/data/api_keys.json
+      - RATE_LIMIT_REQUESTS=1000
+      - RATE_LIMIT_WINDOW=3600
+    volumes:
+      - ./auth_service/data:/app/data
+    networks:
+      - reliability-net
+    restart: unless-stopped
+
+  # Webhook Service
+  webhook-service:
+    build:
+      context: ./webhook_service
+    container_name: webhook-service
+    ports:
+      - "8085:8085"
+    environment:
+      - PORT=8085
+      - ANOMALY_SERVICE_URL=http://anomaly-service:8080
+      - WEBHOOK_CHECK_INTERVAL=30
+    networks:
+      - reliability-net
+    depends_on:
+      - anomaly-service
+    restart: unless-stopped
+
   # Jaeger
   jaeger:
     image: jaegertracing/all-in-one:latest
