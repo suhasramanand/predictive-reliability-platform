@@ -50,6 +50,14 @@ auth_service/data/
 webhook_service/data/
 **/data/api_keys.json
 
+# Internal documentation (not for public repo)
+BLOG_POST.md
+LINKEDIN_POST.md
+API_DOCUMENTATION.md
+SDK_EXAMPLES.md
+ML_REALITY_CHECK.md
+PRODUCTION_READINESS.md
+
 # Testing
 .pytest_cache/
 htmlcov/
